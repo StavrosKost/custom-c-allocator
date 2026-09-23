@@ -2,46 +2,26 @@
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "malloc.h"
 
-struct malloc_chunk{
-    size_t size_previous_chunk;
-    size_t size;
-    struct malloc_chunk* next;
-    struct malloc_chunk* previous;
-    char data[];
-};
+#define ALIGNMENT(size) (((size) + 0xf) & ~(size_t)0xf)
 
-#define META_SIZE sizeof(struct malloc_chunk)
-
-void *global_base = NULL;
-void *global_tail = NULL;
-
-struct malloc_chunk* smallbin[62];
-struct malloc_chunk *request_space(size_t size);
-struct malloc_chunk *to_bin(struct malloc_chunk* control,size_t size);
-struct malloc_chunk *from_bin(size_t size);
-
-void free(void *ptr);
+//to be added coalescing
 
 void *malloc(size_t size){
     struct malloc_chunk *chunk;
-    if (size<=0){
+    if (size == 0){
         return NULL;
     }
     //this make is 16 byte aligned
-    while((size+META_SIZE)%16!=0){
-        size++;
-    }
-    size = size + META_SIZE;
+    size  = ALIGNMENT(size+META_SIZE);
     if (!global_base){
         chunk = request_space(size);
         if (!chunk){
             return NULL;
         }
         global_base = chunk;
-        global_tail = global_base;
     }else{
-        struct malloc_chunk *last = global_tail;
         chunk = from_bin(size);
         if (!chunk){
             chunk = request_space(size);
@@ -52,15 +32,6 @@ void *malloc(size_t size){
     }
     
     return (chunk+1);
-}
-
-void *calloc(size_t nelem, size_t elsize){
-    size_t size = nelem * elsize;
-    void *ptr = malloc(size);
-    if (ptr){
-        memset(ptr, 0 ,size);
-    }
-    return ptr;
 }
 
 void free(void *ptr){
@@ -111,6 +82,5 @@ struct malloc_chunk *request_space(size_t size){
     block->next = NULL;
     size = size | 0x01;
     block->size = size; 
-    global_tail = block;
     return block;
 }
