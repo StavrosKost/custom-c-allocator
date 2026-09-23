@@ -14,4 +14,8 @@ Developed a custom C allocator which mimics the way glibc allocates data using m
 ```
 gcc -shared -fPIC -o libmymalloc.so mymalloc.c
 LD_PRELOAD=./libmymalloc.so ./program
+
+or
+
+gcc test.c mymalloc.c -o my_program
 ```
