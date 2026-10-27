@@ -9,7 +9,7 @@
 //also when a space is freed it should check if it can fit inside the freed space
 
 void *malloc(size_t size){
-    struct malloc_chunk *chunk;
+    struct malloc_chunk *chunk = 0;
     if (size == 0){
         return NULL;
     }
@@ -21,17 +21,19 @@ void *malloc(size_t size){
             return NULL;
         }
         global_base = chunk;
+        global_tail = global_base;
     }else{
-        struct malloc_chunk* tmp = chunk;
         chunk = from_bin(size);
         if (!chunk){
             chunk = request_space(size);
             if (!chunk){
                 return NULL;
             }
+            chunk->previous = global_tail;
+            chunk->previous->next = chunk;
+            global_tail = chunk;
         }
-        chunk->previous = tmp;
-        chunk->previous->next = chunk;
+        
     }
     return (chunk+1);
 }
@@ -42,37 +44,42 @@ void free(void *ptr){
     }
 
     struct malloc_chunk* control = (struct malloc_chunk*)((char*)ptr - META_SIZE); //ptr points to the given malloc_chunk
-    control->size = control->size & ~0x0f; //the block size will have 0 in the last nibble of the size to indicate that it is not in use
-    
-    if (control->next){
-        if ((control->next->size & 0x1) == 0){
-            //coalescing
-            control->size += control->next->size;
-            control->next = control->next->next;
-            if (control->next){
-                control->next->previous = control;
-            }
-        }
-    }
-    if (control->previous){
-        if ((control->previous->size & 0x1) == 0){
-            //coalescing
-            control->previous->size += control->size;
-            control->previous->next = control->next;
-            if (control->next){
-                control->next->previous = control->previous;
-            }
-            control = control->previous;
-        }
-    }  
-    to_bin(control, control->size);  
-}
-
-void to_bin(struct malloc_chunk* control,size_t size){
-    if(!control || size>=1024){
+    if ((control->size & 0x1) == 0){
         return;
     }
-    size_t i = (size-32)/16;
+    control->size = control->size & ~0x0f; //the block size will have 0 in the last nibble of the size to indicate that it is not in use
+    
+    if ((control->next) && (control->next->size & 0x1) == 0){
+        remove_from_bin(control->next);
+        //coalescing
+        control->size += control->next->size;
+        control->next = control->next->next;
+        if (control->next){
+            control->next->previous = control;
+        }else{
+            global_tail = control;
+        }
+    }
+    if ((control->previous) && (control->previous->size & 0x1) == 0){
+        remove_from_bin(control->previous);
+        //coalescing
+        control->previous->size += control->size;
+        control->previous->next = control->next;
+        if (control->next){
+            control->next->previous = control->previous;
+        }else {
+            global_tail = control->previous;
+        }
+        control = control->previous;
+    }  
+    to_bin(control);  
+}
+
+void to_bin(struct malloc_chunk* control){
+    if(!control || control->size>=1024){
+        return;
+    }
+    size_t i = (control->size -32)/16;
     control->fd = smallbin[i];
     smallbin[i] = control;
 }
@@ -96,9 +103,32 @@ struct malloc_chunk *from_bin(size_t size){
     }
     
     tmp = smallbin[i];
-    smallbin[i] = tmp->next;
+    smallbin[i] = tmp->fd;
     tmp->size |= 0x1;
     return tmp; 
+}
+
+void remove_from_bin(struct malloc_chunk *target){
+    if (!target || target->size >= 1024){
+        return;
+    }
+    size_t i = (target->size - 32) / 16;
+    struct malloc_chunk *curr = smallbin[i];
+    struct malloc_chunk *prev = NULL;
+
+    while (curr) {
+        if (curr == target) {
+            if (prev) {
+                prev->fd = curr->fd;
+            } else {
+                smallbin[i] = curr->fd;
+            }
+            curr->fd = NULL;
+            return;
+        }
+        prev = curr;
+        curr = curr->fd;
+    }
 }
 
 struct malloc_chunk *request_space(size_t size){
